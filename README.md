@@ -21,6 +21,15 @@ Registering the CA in the identity account does not create a trust anchor anywhe
 
 Both certificates get `OU=production` from the Vault role when the issue request omits OU. The trust policy separates them by CN. Do not give the Vault token to the workload: a caller that holds it can supply a different OU.
 
+Production clock, which `./demo.sh lifecycle` runs on this Vault:
+
+- The root is a general-purpose Private CA. It signs the intermediate. It is not the trust anchor.
+- The intermediate is a short-lived Private CA, last in the chain, renewed every 7 days. It issues for at most 7 days, through `IssueCertificate`. ACM does not issue from it.
+- Vault stores the certificate and the key, and writes the next version before `notAfter`.
+- The identity account is the only account that trusts the intermediate. Payment and inventory allow a role, or they do not.
+
+The lab CA stands in for that intermediate. `lifecycle` does not create a Private CA.
+
 ## What `run` proves
 
 1. The payment and inventory accounts do not have this trust anchor.
@@ -110,6 +119,7 @@ Run the commands from this directory.
 | `stage` | Same preparation, then four steps. Enter between steps. Prints the assumed-role ARN and expiry only. |
 | `certs` | Subject, issuer, validity, signature, key usage, basic constraints. Does not print the private key. |
 | `contain` | Put inline policy `lab-token-issue-deny` on `PaymentReconcilerRole`: deny `s3:GetObject` when `aws:TokenIssueTime` is before now+60s. Wait until S1 is denied, then delete the policy. |
+| `lifecycle` | Issue a certificate into Vault, write the next version before `notAfter`, revoke the previous serial in Vault, and leave the CRL unimported. Does not replace files in `certs/` and does not create a Private CA. |
 | `down --yes` | Delete CRL `ra-lab-crl`, `terraform destroy` in all three accounts, `docker compose down -v`, delete `.run/`, `bin/`, and cert files. |
 
 `run` deletes `ra-lab-crl` before S1 is issued, then imports a CRL signed by the current issuing CA after revoke. A CRL left from an older issuing key makes `CreateSession` fail with `Untrusted signing certificate`.
@@ -159,9 +169,60 @@ An imported CRL is not dropped when `nextUpdate` passes. Import again when the C
 
 `EXIT` deletes `lab-token-issue-deny`. If the process is killed before the trap runs, delete that inline policy before reading the result of a later `GetObject`.
 
+## When revoke does not do what you expected
+
+Revoke in Vault is not revoke in Roles Anywhere. `run` revokes the serial, reads the PEM CRL, checks the serial is in it, then imports or updates `ra-lab-crl` and enables it on this trust anchor.
+
+| What you see | What it means |
+| --- | --- |
+| A new session is still issued | The CRL is missing, disabled, or does not contain this serial. `run` retries `CreateSession` 12 times, 5 seconds apart. |
+| Every certificate fails with `Untrusted signing certificate` | An enabled CRL was signed by a previous issuing key. Delete `ra-lab-crl`, then import a CRL signed by the current issuing CA. `run` deletes that CRL before it takes S1. |
+| S1 still reads the object | Expected. The CRL does not reach a session already issued. `./demo.sh contain` denies `s3:GetObject` when `aws:TokenIssueTime` is before T. That matches every session of `PaymentReconcilerRole` issued before T, not only S1. |
+| `CreateSession` is denied after CDP checking is turned on | `crlDpRevocationEnabled` stays off here. A CDP Roles Anywhere cannot fetch denies `CreateSession`. After a real CDP is published, the documented wait is up to 30 minutes. OCSP is not consulted. |
+
+An imported CRL is not dropped when `nextUpdate` passes. Import again when the CA publishes. `ImportCrl` requires PEM, and the CRL has to be signed by the issuing CA.
+
+## Lifecycle
+
+`./demo.sh lifecycle` is the Vault half of the clock. It needs `./demo.sh up` first.
+
+1. Issue `payment-reconciler` for 24 hours and write certificate, key, serial, and `notAfter` to `secret/roles-anywhere/payment-reconciler`. The key is stored and not printed.
+2. Issue the next certificate and write the next version. Version 1 still holds the previous serial. Both can take a session until the old `notAfter`, and until a CRL is imported.
+3. Revoke the previous serial in Vault. The CRL is not imported, so Roles Anywhere still accepts that serial. On the short-lived intermediate that is the intended control: stop renewing, then let it expire. `run` is the path that imports a CRL, because the lab CA can sign one.
+
+The files in `certs/` are left as they are.
+
+Renewing the intermediate is the other clock. The root signs the next intermediate certificate, at most 7 days. Both issuing certificates go into the trust anchor bundle. Vault then issues from the new intermediate. The old issuing certificate comes out only after every certificate it signed has expired. A bundle that keeps only the new issuing certificate rejects the certificates the old one signed. The root stays out of the bundle. An enabled CRL signed by the removed key makes `CreateSession` fail with `Untrusted signing certificate`.
+
+Do not put a CRL quota or a bundle size in the runbook. The published pages disagree. Use the quota applied in the account.
+
+Revoke is three clocks:
+
+- One workload certificate. Vault stops writing the next version. `CreateSession` still succeeds until `notAfter`.
+- A session already issued. `./demo.sh contain` denies the next request. Certificate expiry does not end it.
+- The intermediate. The root can revoke that certificate. Roles Anywhere notices when the certificate leaves the bundle. OCSP is not consulted. Disabling the trust anchor stops new sessions in that account only.
+
+## Accounts
+
+| Account | Managed here | Not managed here |
+| --- | --- | --- |
+| identity | trust anchor, both roles, both profiles, CRL `ra-lab-crl` | the buckets |
+| payment | bucket, objects, bucket policy for `PaymentReconcilerRole` | a trust anchor |
+| inventory | bucket, object, bucket policy for `InventoryWorkerRole` | a trust anchor |
+
+Disabling the trust anchor stops new sessions in the identity account. It does not stop a session already issued, and it does not change the other two accounts.
+
+A data account denies the call by having no allow for that role. An identity policy that allows the bucket is not enough on its own.
+
+An account that should vend its own sessions needs its own trust anchor, profile, and role trust. Registering the CA in the identity account does not create them.
+
+`accounts.env` is the admin credential for each account. The workload never receives it. Do not give the workload the Vault token: a caller who holds it can supply a different OU.
+
+`down --yes` deletes the CRL, destroys the trust anchor, the roles, the profiles, and both buckets, then removes the local CA.
+
 ## Out of scope
 
-- AWS Private CA
+- creating the Private CA. A general-purpose root and a short-lived intermediate are billed, and `lifecycle` does not call `CreateCertificateAuthority`
 - CDP, including the documented delay of up to 30 minutes after publication
 - OCSP
 - a trust anchor in the payment or inventory account

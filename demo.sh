@@ -15,6 +15,7 @@ Usage:
   ./demo.sh run             Issue certs, take S1, revoke, import the CRL, check access
   ./demo.sh stage           Same preparation, then four steps. Enter between steps
   ./demo.sh contain         Deny an issued session with aws:TokenIssueTime, then remove the deny
+  ./demo.sh lifecycle       Issue, renew, and revoke one certificate in Vault
   ./demo.sh down --yes      Destroy AWS resources, stop Vault, delete local certificates
 
 First run: up, aws, run.
@@ -603,6 +604,7 @@ main() {
     run) cmd_run ;;
     stage) cmd_stage ;;
     contain) cmd_contain ;;
+    lifecycle) bash "$ROOT/scripts/lifecycle.sh" ;;
     down) cmd_down "${2:-}" ;;
     -h|--help|help|"") usage ;;
     *) usage; die "unknown command '$1'." ;;
