@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RoleAllowsBothDataBuckets",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "${payment_bucket_arn}/*",
+        "${inventory_bucket_arn}/*"
+      ]
+    }
+  ]
+}

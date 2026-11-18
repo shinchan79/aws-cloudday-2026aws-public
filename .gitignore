@@ -1,0 +1,14 @@
+.run/
+accounts.env
+certs/*
+!certs/.gitignore
+bin/
+terraform/.terraform/
+terraform/terraform.tfvars
+terraform/terraform.tfvars.json
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/crash.log
+*.pem
+*.key
+*.csr

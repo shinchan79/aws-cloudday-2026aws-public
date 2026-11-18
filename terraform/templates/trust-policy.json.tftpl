@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RolesAnywherePositiveMatch",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "rolesanywhere.amazonaws.com"
+      },
+      "Action": [
+        "sts:AssumeRole",
+        "sts:TagSession",
+        "sts:SetSourceIdentity"
+      ],
+      "Condition": {
+        "ArnEquals": {
+          "aws:SourceArn": "${trust_anchor_arn}"
+        },
+        "StringEquals": {
+          "aws:PrincipalTag/x509Subject/CN": "${common_name}",
+          "aws:PrincipalTag/x509Subject/OU": "${organizational_unit}"
+        }
+      }
+    }
+  ]
+}
