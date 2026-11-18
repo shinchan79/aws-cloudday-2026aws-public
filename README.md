@@ -19,13 +19,13 @@ Three accounts, one Region. Vault dev issues a root and an issuing CA. The trust
 
 Registering the CA in the identity account does not create a trust anchor anywhere else. A second account vends its own sessions only after it has its own trust anchor, profile, and role trust. This lab does not do that.
 
-Both certificates get `OU=production` from the Vault role when the issue request omits OU. The trust policy separates them by CN. Do not give the Vault token to the workload: a caller that holds it can supply a different OU.
+Both certificates get `OU=production` from the Vault role when the issue request omits OU. The trust policy separates them by CN. Do not give the Vault token to the workload. In this lab that token can issue either role, so it can choose the CN. The role sets `OU=production`.
 
 Production clock, which `./demo.sh lifecycle` runs on this Vault:
 
 - The root is a general-purpose Private CA. It signs the intermediate. It is not the trust anchor.
-- The intermediate is a short-lived Private CA, last in the chain, renewed every 7 days. It issues for at most 7 days, through `IssueCertificate`. ACM does not issue from it.
-- Vault stores the certificate and the key, and writes the next version before `notAfter`.
+- The intermediate is a short-lived Private CA, last in the chain. Its own certificate is renewed every 7 days. A workload certificate is a separate clock, at most 7 days, issued with `IssueCertificate`. ACM does not issue from it.
+- Vault issues the certificate and keeps a copy of the key. The workload signs with the copy it receives. Roles Anywhere does not receive the key. The next version is written before `notAfter`.
 - The identity account is the only account that trusts the intermediate. Payment and inventory allow a role, or they do not.
 
 The lab CA stands in for that intermediate. `lifecycle` does not create a Private CA.
@@ -216,7 +216,7 @@ A data account denies the call by having no allow for that role. An identity pol
 
 An account that should vend its own sessions needs its own trust anchor, profile, and role trust. Registering the CA in the identity account does not create them.
 
-`accounts.env` is the admin credential for each account. The workload never receives it. Do not give the workload the Vault token: a caller who holds it can supply a different OU.
+`accounts.env` is the admin credential for each account. The workload never receives it. Do not give the workload the Vault token. In this lab that token can issue either role, so it can choose the CN. The role sets `OU=production`.
 
 `down --yes` deletes the CRL, destroys the trust anchor, the roles, the profiles, and both buckets, then removes the local CA.
 
